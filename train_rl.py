@@ -135,7 +135,7 @@ def main():
             ep_max_prog = max(ep_max_prog, info.get("progress_frac", 0.0))
             if terminated or truncated:
                 print(f"[eval] episode {ep:>2}: {ep_steps:>4} steps | reward {ep_reward:7.1f} | "
-                      f"reached {ep_max_prog*100:5.1f}% of lap | laps {int(info.get('lap_count', 0))} | "
+                      f"reached {ep_max_prog*100:5.1f}% of lap | laps {int(info.get('laps', 0))} | "
                       f"ended |cte|={abs(float(info.get('cte', 0.0))):.2f}")
                 ep += 1
                 ep_reward, ep_steps, ep_max_prog = 0.0, 0, 0.0
