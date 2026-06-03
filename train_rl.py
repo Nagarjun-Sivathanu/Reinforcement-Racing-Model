@@ -14,7 +14,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime
 import os
+import shutil
 import subprocess
 import uuid
 
@@ -109,6 +111,9 @@ def main():
     p.add_argument("--env", type=str, default=ENV_NAME, help="gym-donkeycar env id")
     p.add_argument("--throttle-min", type=float, default=0.0,
                    help="min throttle; set negative (e.g. -1.0) to allow braking")
+    p.add_argument("--run-name", type=str, default=None,
+                   help="name for this run's checkpoint folder (default: timestamped). "
+                        "Each run gets its own folder so models are never overwritten.")
     args = p.parse_args()
 
     waypoints = load_waypoints(args.track)
@@ -138,9 +143,13 @@ def main():
         env.close()
         return
 
-    os.makedirs(os.path.join(HERE, "checkpoints"), exist_ok=True)
+    # Per-run checkpoint folder so a new run NEVER overwrites an older run's models.
+    run_name = args.run_name or datetime.datetime.now().strftime("run_%Y%m%d_%H%M%S")
+    ckpt_dir = os.path.join(HERE, "checkpoints", run_name)
+    os.makedirs(ckpt_dir, exist_ok=True)
     os.makedirs(os.path.join(HERE, "models"), exist_ok=True)
     os.makedirs(TB_DIR, exist_ok=True)
+    print(f"[train_rl] run '{run_name}' -> checkpoints in {ckpt_dir}")
 
     if args.load:
         try:
@@ -159,7 +168,7 @@ def main():
 
     ckpt = CheckpointCallback(
         save_freq=5000,
-        save_path=os.path.join(HERE, "checkpoints"),
+        save_path=ckpt_dir,
         name_prefix="sac_donkey",
     )
     print(f"[train_rl] training for {args.timesteps} timesteps (Ctrl-C to stop & save)")
@@ -167,9 +176,11 @@ def main():
         model.learn(total_timesteps=args.timesteps, callback=ckpt, progress_bar=True)
     except KeyboardInterrupt:
         print("\n[train_rl] interrupted - saving current model")
-    final = os.path.join(HERE, "models", "sac_donkey")
-    model.save(final)
-    print(f"[train_rl] saved -> {final}.zip")
+    # Save a per-run final model (never overwritten) plus a stable convenience copy.
+    final_run = os.path.join(HERE, "models", f"{run_name}.zip")
+    model.save(final_run)
+    shutil.copyfile(final_run, os.path.join(HERE, "models", "sac_donkey.zip"))
+    print(f"[train_rl] saved -> {final_run} (and copied to models/sac_donkey.zip)")
     env.close()
 
 
