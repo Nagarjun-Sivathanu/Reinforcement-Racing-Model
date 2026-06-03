@@ -1,0 +1,13 @@
+# Rl_Race — Python 3.10. Install torch from the CPU wheel index first, then this file:
+#   pip install torch==2.12.0 --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
+torch==2.12.0                 # CPU build (see index-url above); MLP policy, sim is the bottleneck
+stable-baselines3==2.8.0
+gymnasium==1.2.3
+numpy
+tqdm                          # SB3 progress_bar=True dependency
+rich                          # SB3 progress_bar=True dependency
+tensorboard                   # training curves -> `tensorboard --logdir tb`
+
+# DonkeySim Gym environment (upstream, pinned to the commit this project was built/tested on)
+gym-donkeycar @ git+https://github.com/tawnkramer/gym-donkeycar.git@a1f4ca6

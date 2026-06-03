@@ -1,0 +1,25 @@
+# --- Python / venv ---
+.venv/
+__pycache__/
+*.pyc
+
+# --- training outputs (regenerated; not source) ---
+models/
+checkpoints/
+tb/
+logs/
+*.zip
+install.log
+
+# --- raw recorder debug dumps (keep the cleaned tracks/<name>.npy) ---
+tracks/*_raw.npy
+
+# --- editor / tooling ---
+.claude/
+.vscode/
+.idea/
+
+# --- local handoff / context docs (intentionally not published) ---
+PROJECT.md
+RL_orientation.md
+CLAUDE.md

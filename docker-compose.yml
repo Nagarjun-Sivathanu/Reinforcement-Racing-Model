@@ -1,0 +1,25 @@
+# Convenience wrapper around the Dockerfile.
+#
+#   SIM_HOST=192.168.1.50 docker compose up --build       # train (override the sim IP)
+#   SIM_HOST=192.168.1.50 docker compose run --rm trainer --test --load models/sac_donkey
+#
+# DonkeySim runs OUTSIDE the container. Set SIM_HOST to the machine running the sim.
+# On Linux you can use host networking and SIM_HOST=127.0.0.1; on Docker Desktop
+# (Win/Mac) use SIM_HOST=host.docker.internal.
+services:
+  trainer:
+    build: .
+    image: rl_race
+    environment:
+      SIM_HOST: "${SIM_HOST:-host.docker.internal}"
+      SIM_PORT: "${SIM_PORT:-9091}"
+    # Lets the container reach a sim on the host (esp. Docker Desktop). On native Linux,
+    # prefer `network_mode: host` and SIM_HOST=127.0.0.1 instead.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./models:/app/models
+      - ./checkpoints:/app/checkpoints
+      - ./tb:/app/tb
+    # Args here are appended to the ENTRYPOINT (python train_rl.py ...).
+    command: ["--timesteps", "300000"]
