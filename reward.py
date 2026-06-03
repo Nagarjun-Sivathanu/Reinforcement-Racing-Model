@@ -29,8 +29,12 @@ from track_utils import ground_xz, nearest_index, signed_cte, lookahead_local
 
 # --- reward weights (tune these) -------------------------------------------
 K_PROGRESS = 1.0          # reward per world-unit advanced along the path (the workhorse)
-K_SPEED = 0.05            # small bonus per unit forward velocity (encourages commitment)
-TERMINAL_PENALTY = -10.0  # ending the episode (off-track / crash)
+K_SPEED = 0.05            # small bonus per unit forward velocity (kept low: see TIME_PENALTY)
+TERMINAL_PENALTY = -10.0  # ending the episode (off-track / crash) -- kept strong on purpose:
+                          # it's what makes braking worthwhile and prevents reckless full-send
+TIME_PENALTY = -0.05      # small per-step cost: kills crawling/dawdling without full-send,
+                          # because the strong terminal penalty still punishes crashing
+K_SMOOTH = 0.1            # penalty on step-to-step action change (anti-jitter / anti-panic)
 SECTOR_BONUS = 5.0        # once-per-lap, in-order bonus for crossing a checkpoint line
 LAP_BONUS_FLAT = 50.0     # flat reward for a *real* (checkpoint-gated) completed lap
 LAP_BONUS_TIME = 300.0    # time bonus = LAP_BONUS_TIME / lap_seconds, capped below
@@ -39,7 +43,7 @@ LAP_TIME_CAP = 50.0       # hard cap on the time bonus (prevents any blow-up exp
 # --- checkpoints / observation shape ---------------------------------------
 NUM_CHECKPOINTS = 8       # progress gates per lap ("lines across the road", not points)
 SIM_DT = 0.05             # approx seconds/step, used only to scale the (capped) time bonus
-N_AHEAD = 5               # how many lookahead waypoints the policy sees
+N_AHEAD = 8               # how many lookahead waypoints the policy sees (richer corner preview)
 GAP = 3                   # spacing between lookahead points, in waypoint indices
 SEARCH_WINDOW = 20        # forward window for nearest-waypoint search (anti-shortcut)
 
@@ -106,8 +110,11 @@ class WaypointObs(gym.Wrapper):
 
     def step(self, action):
         a = np.asarray(action, dtype=np.float32).reshape(-1)
-        self._last_action = np.zeros(2, dtype=np.float32)
-        self._last_action[: min(2, a.shape[0])] = a[:2]
+        cur_action = np.zeros(2, dtype=np.float32)
+        cur_action[: min(2, a.shape[0])] = a[:2]
+        # how much the action changed since last step (for the smoothness penalty)
+        action_delta = float(np.abs(cur_action - self._last_action).sum())
+        self._last_action = cur_action
 
         obs, _env_reward, terminated, truncated, info = self.env.step(action)
         self._step += 1
@@ -120,6 +127,8 @@ class WaypointObs(gym.Wrapper):
 
         reward = K_PROGRESS * advanced * self.spacing
         reward += K_SPEED * float(info.get("forward_vel", 0.0))
+        reward += TIME_PENALTY                       # anti-crawl time cost
+        reward -= K_SMOOTH * action_delta            # anti-jitter smoothness penalty
 
         # ordered, once-per-lap checkpoint (sector) bonuses
         cp_size = self.n / self.num_cp

@@ -83,12 +83,15 @@ def make_env(env_name: str, waypoints: np.ndarray, throttle_min: float = 0.0) ->
     return env
 
 
-def build_model(env: gym.Env) -> SAC:
-    """Fresh SAC with the project's hyperparameters (small replay buffer -> low RAM)."""
+def build_model(env: gym.Env, buffer_size: int = 50000, learning_rate: float = 3e-4,
+                learning_starts: int = 1000) -> SAC:
+    """Fresh SAC. Bigger buffer_size (cheap with low-dim obs) = more stable, more diverse
+    experience; lower learning_rate = steadier updates (anti-regression)."""
     return SAC(
         "MlpPolicy", env, verbose=1,
-        buffer_size=50000, learning_starts=1000, batch_size=256,
-        train_freq=64, gradient_steps=64, device="cpu", tensorboard_log=TB_DIR,
+        buffer_size=buffer_size, learning_starts=learning_starts, batch_size=256,
+        learning_rate=learning_rate, train_freq=64, gradient_steps=64,
+        device="cpu", tensorboard_log=TB_DIR,
     )
 
 
@@ -114,6 +117,11 @@ def main():
     p.add_argument("--run-name", type=str, default=None,
                    help="name for this run's checkpoint folder (default: timestamped). "
                         "Each run gets its own folder so models are never overwritten.")
+    p.add_argument("--buffer-size", type=int, default=50000,
+                   help="SAC replay buffer size (bigger = more stable; cheap with low-dim obs)")
+    p.add_argument("--lr", type=float, default=3e-4, help="learning rate (lower = steadier)")
+    p.add_argument("--learning-starts", type=int, default=1000,
+                   help="random steps to seed the buffer before learning")
     args = p.parse_args()
 
     waypoints = load_waypoints(args.track)
@@ -160,11 +168,11 @@ def main():
             # unchanged (action is still 2-D), so warm-start: copy weights into a fresh model
             # with the NEW action space. Steering/track knowledge transfers; throttle relearns.
             print(f"[train_rl] space change detected ({e}); warm-starting weights from {args.load}")
-            model = build_model(env)
+            model = build_model(env, args.buffer_size, args.lr, args.learning_starts)
             model.set_parameters(args.load)
     else:
-        print("[train_rl] new SAC model (MlpPolicy, CPU)")
-        model = build_model(env)
+        print(f"[train_rl] new SAC model (MlpPolicy, CPU) buffer={args.buffer_size} lr={args.lr}")
+        model = build_model(env, args.buffer_size, args.lr, args.learning_starts)
 
     ckpt = CheckpointCallback(
         save_freq=5000,
