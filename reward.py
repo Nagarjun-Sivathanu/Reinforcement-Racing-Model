@@ -113,4 +113,8 @@ class WaypointObs(gym.Wrapper):
         if terminated or truncated:
             reward += TERMINAL_PENALTY
 
+        # expose progress so evaluation/logging can report how far around the lap we got
+        info["progress_frac"] = self._idx / self.n
+        info["progress_idx"] = self._idx
+
         return self._vec(info), float(reward), terminated, truncated, info

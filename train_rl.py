@@ -56,7 +56,7 @@ def sim_host() -> str:
     return "127.0.0.1"
 
 
-def make_env(env_name: str, waypoints: np.ndarray) -> gym.Env:
+def make_env(env_name: str, waypoints: np.ndarray, throttle_min: float = 0.0) -> gym.Env:
     conf = {
         "exe_path": "remote",          # attach to the already-running sim
         "host": sim_host(),
@@ -71,7 +71,7 @@ def make_env(env_name: str, waypoints: np.ndarray) -> gym.Env:
         "guid": str(uuid.uuid4()),
         "max_cte": MAX_CTE,
         "steer_limit": 1.0,
-        "throttle_min": 0.0,
+        "throttle_min": throttle_min,   # set negative to allow braking
         "throttle_max": 1.0,
     }
     env = gym.make(env_name, conf=conf)
@@ -79,6 +79,15 @@ def make_env(env_name: str, waypoints: np.ndarray) -> gym.Env:
     env = WaypointObs(env, waypoints, max_cte=MAX_CTE)  # track-relative waypoint following
     env = Monitor(env)                             # episode reward/length logging
     return env
+
+
+def build_model(env: gym.Env) -> SAC:
+    """Fresh SAC with the project's hyperparameters (small replay buffer -> low RAM)."""
+    return SAC(
+        "MlpPolicy", env, verbose=1,
+        buffer_size=50000, learning_starts=1000, batch_size=256,
+        train_freq=64, gradient_steps=64, device="cpu", tensorboard_log=TB_DIR,
+    )
 
 
 def load_waypoints(track: str) -> np.ndarray:
@@ -98,21 +107,33 @@ def main():
     p.add_argument("--load", type=str, default=None, help="path to a saved model (no .zip)")
     p.add_argument("--track", type=str, default="minimonaco", help="waypoints: tracks/<track>.npy")
     p.add_argument("--env", type=str, default=ENV_NAME, help="gym-donkeycar env id")
+    p.add_argument("--throttle-min", type=float, default=0.0,
+                   help="min throttle; set negative (e.g. -1.0) to allow braking")
     args = p.parse_args()
 
     waypoints = load_waypoints(args.track)
-    print(f"[train_rl] track '{args.track}': {len(waypoints)} waypoints, env {args.env}")
-    env = make_env(args.env, waypoints)
+    print(f"[train_rl] track '{args.track}': {len(waypoints)} waypoints, env {args.env}, "
+          f"throttle_min={args.throttle_min}")
+    env = make_env(args.env, waypoints, throttle_min=args.throttle_min)
 
     if args.test:
         model_path = args.load or os.path.join(HERE, "models", "sac_donkey")
         print(f"[train_rl] loading {model_path} and driving deterministically")
         model = SAC.load(model_path, env=env)
         obs, info = env.reset()
+        ep, ep_reward, ep_steps, ep_max_prog = 1, 0.0, 0, 0.0
         for _ in range(5000):
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
+            ep_reward += reward
+            ep_steps += 1
+            ep_max_prog = max(ep_max_prog, info.get("progress_frac", 0.0))
             if terminated or truncated:
+                print(f"[eval] episode {ep:>2}: {ep_steps:>4} steps | reward {ep_reward:7.1f} | "
+                      f"reached {ep_max_prog*100:5.1f}% of lap | laps {int(info.get('lap_count', 0))} | "
+                      f"ended |cte|={abs(float(info.get('cte', 0.0))):.2f}")
+                ep += 1
+                ep_reward, ep_steps, ep_max_prog = 0.0, 0, 0.0
                 obs, info = env.reset()
         env.close()
         return
@@ -122,22 +143,19 @@ def main():
     os.makedirs(TB_DIR, exist_ok=True)
 
     if args.load:
-        print(f"[train_rl] continuing training from {args.load}")
-        model = SAC.load(args.load, env=env, tensorboard_log=TB_DIR)
+        try:
+            model = SAC.load(args.load, env=env, tensorboard_log=TB_DIR)
+            print(f"[train_rl] continuing training from {args.load} (matched spaces)")
+        except ValueError as e:
+            # Spaces changed (e.g. throttle range widened for braking). Network shapes are
+            # unchanged (action is still 2-D), so warm-start: copy weights into a fresh model
+            # with the NEW action space. Steering/track knowledge transfers; throttle relearns.
+            print(f"[train_rl] space change detected ({e}); warm-starting weights from {args.load}")
+            model = build_model(env)
+            model.set_parameters(args.load)
     else:
         print("[train_rl] new SAC model (MlpPolicy, CPU)")
-        model = SAC(
-            "MlpPolicy",
-            env,
-            verbose=1,
-            buffer_size=50000,      # small replay buffer -> low RAM
-            learning_starts=1000,
-            batch_size=256,
-            train_freq=64,
-            gradient_steps=64,
-            device="cpu",
-            tensorboard_log=TB_DIR,   # `tensorboard --logdir tb` to watch live
-        )
+        model = build_model(env)
 
     ckpt = CheckpointCallback(
         save_freq=5000,
