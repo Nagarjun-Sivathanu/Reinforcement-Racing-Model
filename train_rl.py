@@ -122,6 +122,10 @@ def main():
     p.add_argument("--lr", type=float, default=3e-4, help="learning rate (lower = steadier)")
     p.add_argument("--learning-starts", type=int, default=1000,
                    help="random steps to seed the buffer before learning")
+    p.add_argument("--load-buffer", type=str, default=None,
+                   help="path to a saved replay buffer (.pkl) to resume WITHOUT the warm-start "
+                        "dip (the 'look-back data'). Saved automatically on stop as "
+                        "models/<run-name>_replay.pkl")
     args = p.parse_args()
 
     waypoints = load_waypoints(args.track)
@@ -160,16 +164,24 @@ def main():
     print(f"[train_rl] run '{run_name}' -> checkpoints in {ckpt_dir}")
 
     if args.load:
-        try:
-            model = SAC.load(args.load, env=env, tensorboard_log=TB_DIR)
-            print(f"[train_rl] continuing training from {args.load} (matched spaces)")
-        except ValueError as e:
-            # Spaces changed (e.g. throttle range widened for braking). Network shapes are
-            # unchanged (action is still 2-D), so warm-start: copy weights into a fresh model
-            # with the NEW action space. Steering/track knowledge transfers; throttle relearns.
-            print(f"[train_rl] space change detected ({e}); warm-starting weights from {args.load}")
-            model = build_model(env, args.buffer_size, args.lr, args.learning_starts)
-            model.set_parameters(args.load)
+        # Always warm-start WEIGHTS into a fresh model built with the CLI hyperparameters, so
+        # stability settings (buffer_size, lr) actually apply (SAC.load would restore the old
+        # saved hyperparameters instead). Network shapes must match the loaded model: keep the
+        # same obs dim (N_AHEAD) and action dim. Works for same-space continues AND action-space
+        # changes (e.g. adding braking) since the action is still 2-D.
+        print(f"[train_rl] warm-starting weights from {args.load} "
+              f"(buffer={args.buffer_size} lr={args.lr})")
+        model = build_model(env, args.buffer_size, args.lr, args.learning_starts)
+        model.set_parameters(args.load)
+        # Restoring the replay buffer ("look-back data") avoids the warm-start dip entirely:
+        # the critic keeps its experience instead of relearning from an empty buffer.
+        if args.load_buffer and os.path.exists(args.load_buffer):
+            model.load_replay_buffer(args.load_buffer)
+            print(f"[train_rl] loaded replay buffer from {args.load_buffer} "
+                  f"({model.replay_buffer.size()} samples) - resuming WITHOUT a dip")
+        elif args.load_buffer:
+            print(f"[train_rl] WARNING: --load-buffer {args.load_buffer} not found; "
+                  f"resuming with empty buffer (will dip)")
     else:
         print(f"[train_rl] new SAC model (MlpPolicy, CPU) buffer={args.buffer_size} lr={args.lr}")
         model = build_model(env, args.buffer_size, args.lr, args.learning_starts)
@@ -188,6 +200,14 @@ def main():
     final_run = os.path.join(HERE, "models", f"{run_name}.zip")
     model.save(final_run)
     shutil.copyfile(final_run, os.path.join(HERE, "models", "sac_donkey.zip"))
+    # Save the replay buffer ("look-back data") so a later resume can skip the warm-start dip:
+    #   ./run.sh --load models/<run-name> --load-buffer models/<run-name>_replay.pkl ...
+    buf_path = os.path.join(HERE, "models", f"{run_name}_replay.pkl")
+    try:
+        model.save_replay_buffer(buf_path)
+        print(f"[train_rl] saved replay buffer -> {buf_path} (use --load-buffer to resume dip-free)")
+    except Exception as e:
+        print(f"[train_rl] could not save replay buffer: {e}")
     print(f"[train_rl] saved -> {final_run} (and copied to models/sac_donkey.zip)")
     env.close()
 
