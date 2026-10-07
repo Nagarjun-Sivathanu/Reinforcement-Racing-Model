@@ -23,3 +23,10 @@ tracks/*_raw.npy
 PROJECT.md
 RL_orientation.md
 CLAUDE.md
+HANDOFF_*.md
+Planing.md
+archive/
+.sim_backup/
+
+# --- local diagnostic artifacts (equivalence checks, not real tracks) ---
+tracks/*_linuxcheck.npy
