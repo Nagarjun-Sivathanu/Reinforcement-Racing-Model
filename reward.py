@@ -22,6 +22,7 @@ Wiggling at the start line advances no progress, so it earns nothing. The time b
 """
 from __future__ import annotations
 
+import os
 import numpy as np
 import gymnasium as gym
 
@@ -32,8 +33,8 @@ K_PROGRESS = 1.0          # reward per world-unit advanced along the path (the w
 K_SPEED = 0.05            # small bonus per unit forward velocity (kept low: see TIME_PENALTY)
 TERMINAL_PENALTY = -10.0  # ending the episode (off-track / crash) -- kept strong on purpose:
                           # it's what makes braking worthwhile and prevents reckless full-send
-TIME_PENALTY = -0.05      # small per-step cost: kills crawling/dawdling without full-send,
-                          # because the strong terminal penalty still punishes crashing
+TIME_PENALTY = float(os.environ.get("TIME_PENALTY", "-0.05"))  # per-step cost (env-override);
+                          # set 0 when we WANT the agent free to slow down for a corner
 K_SMOOTH = 0.1            # penalty on step-to-step action change (anti-jitter / anti-panic)
 SECTOR_BONUS = 5.0        # once-per-lap, in-order bonus for crossing a checkpoint line
 LAP_BONUS_FLAT = 50.0     # flat reward for a *real* (checkpoint-gated) completed lap
@@ -43,7 +44,7 @@ LAP_TIME_CAP = 50.0       # hard cap on the time bonus (prevents any blow-up exp
 # --- checkpoints / observation shape ---------------------------------------
 NUM_CHECKPOINTS = 8       # progress gates per lap ("lines across the road", not points)
 SIM_DT = 0.05             # approx seconds/step, used only to scale the (capped) time bonus
-N_AHEAD = 8               # how many lookahead waypoints the policy sees (richer corner preview)
+N_AHEAD = int(os.environ.get("N_AHEAD", "8"))  # lookahead waypoints (env-override to load older models)
 GAP = 3                   # spacing between lookahead points, in waypoint indices
 SEARCH_WINDOW = 20        # forward window for nearest-waypoint search (anti-shortcut)
 
